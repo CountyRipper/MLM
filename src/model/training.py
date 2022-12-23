@@ -1,8 +1,8 @@
 import torch
 from tqdm import tqdm
-from src.model.MLM import BertDataset,MLM
+from model.MLM import BertDataset,MLM
 from transformers import BertTokenizerFast
-from src.utils.utils import read_texts,read_labels,Masked
+from utils.utils import read_texts,read_labels,Masked
 from torch.utils.data import DataLoader
 
 datadir = './dataset/Wiki10-31k/'

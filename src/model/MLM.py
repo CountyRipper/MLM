@@ -18,7 +18,7 @@ class BertDataset(torch.utils.data.Dataset):
         #super(BertDataset, self).__init__()
         self.encodings = encodings
     def __getitem__(self, index):
-        return {key: torch.tensor(val[index]) for key, val in self.encodings.items()}
+        return {key: torch.as_tensor(val[index]) for key, val in self.encodings.items()}
 
     def __len__(self):
         return len(self.encodings.input_ids)
@@ -40,15 +40,16 @@ class MLM(torch.nn.Module):
     def save_model(self,savepath=None,early_stopping=False):
         flag='_es' if early_stopping else ''     
         #存在目录
-        dir = os.join(savepath,time.strftime("%m-%d-%H-%m")+flag+".pt")
-        
-        if os.path.exists(os.path.dirname(savepath)):
+        dir = os.path.join(savepath,time.strftime("%m-%d-%H-%m")+flag+".pt")
+        print(f'dir: {dir}')
+        print(f'savepath:{os.path.dirname(savepath)}')
+        if os.path.exists(os.path.dirname(dir)):
             torch.save(self.state_dict(),dir)
         else:
-            os.mkdir(os.path.dirname(savepath),777)
+            os.mkdir(os.path.dirname(dir))
             torch.save(self.state_dict(),dir)
         print(f'save_dir:{dir}')
-             
+        return dir     
     def load_save_model(self,savepath):
         print(f"savepath: {savepath}")
         self.load_state_dict(torch.load(savepath)) #一般形式为model_dict=model.load_state_dict(torch.load(PATH))        
@@ -60,10 +61,13 @@ class MLM(torch.nn.Module):
         size = len(train_data.dataset)
         eval_loop = tqdm(eval_data,leave=True)
         count=0
+        logdir = './log/mlm_train_'+time.strftime("%m-%d-%H-%m")+'.log'
+        print('*********training*********')
         for each in range(max_epoch):
             self.train()
             loop =  tqdm(train_data,leave=True)
             avg_loss = []
+            
             for ind,batch in enumerate(loop):
                 optimizer.zero_grad()
                 input_ids = batch['input_ids'].to(self.device)
@@ -75,11 +79,19 @@ class MLM(torch.nn.Module):
                 loss.backward()
                 optimizer.step()
                 loop.set_description(f'Epoch {each}')
-                loop.set_postfix(loss=loss.item(),lr=optimizer.param_groups[0]['lr'])
+                loop.set_postfix(loss=f'{loss.item():>7f}',avg_loss = f'{np.mean(avg_loss):>7f}'
+                                 ,lr=optimizer.param_groups[0]['lr'])
                 avg_loss.append(loss.item())
-                if ind %100 ==0:
+                
+                if not os.path.exists(os.path.dirname(logdir)):
+                    os.mkdir(os.path.dirname(logdir))
+                if ind%100 == 0:
                     current = ind*len(batch['input_ids'])
-                    print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]  avg_loss: {np.mean(avg_loss):>7f}")
+                    with open(logdir,'a+') as w:
+                        w.write(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}] avg_loss: {np.mean(avg_loss):>7f} lr:{optimizer.param_groups[0]['lr']:>7f}\n")
+                # if ind %100 ==0:
+                    # current = ind*len(batch['input_ids'])
+                    # print(f"loss: {loss:>7f} [{current:>5d}/{size:>5d}]  avg_loss: {np.mean(avg_loss):>7f}\n")
             avg_loss = np.mean(avg_loss)
             #评估模式
             self.eval()
@@ -92,10 +104,11 @@ class MLM(torch.nn.Module):
                     outputs = self(input_ids,attention_mask=attention_mask,labels=labels)
                     loss = outputs.loss
                     val_loss.append(loss.item())
-                    loop.set_description(f'eval: ')
-                    loop.set_postfix(loss=loss.item())
+                    eval_loop.set_description(f'eval: ')
+                    eval_loop.set_postfix(loss=loss.item())
                 val_loss = np.mean(val_loss)
-                
+                with open(logdir,'a+') as w:
+                    w.write(f'eval_loss: {val_loss:>7f}\n')
             if val_loss<min_val_loss:
                 min_val_loss=val_loss
                 count=0
@@ -103,11 +116,16 @@ class MLM(torch.nn.Module):
                 count=count+1
             if count >2:
                 break
+        
         if count>0:
             #早停
             print(f'earling_stopping,count={str(count)}')
-            self.save_model(savepath,early_stopping=True)
+            with open(logdir,'a+') as w:
+                    w.write(f'earling_stopping,count={str(count)}')
+            if savepath:
+                self.save_model(savepath,early_stopping=True)
         else:
-            self.save_model(savepath)        
+            if savepath:
+                self.save_model(savepath)        
                     
         
